@@ -238,6 +238,44 @@ class PersonConnector:
             print(f"Error adding connection: {e}")
             return False
 
+    def delete_relationship(self, relid):
+        """
+        Delete a relationship by ID from Neo4j.
+        
+        Args:
+            relid (str): The relationship ID to delete
+            
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        query = """
+        MATCH ()-[r]->()
+        WHERE id(r) = $relid
+        DELETE r
+        RETURN count(r) as deleted_count
+        """
+        
+        try:
+            print(f"Attempting to delete relationship with ID: {relid}")
+            with self._driver.session(database="neo4j") as session:
+                try:
+                    int_id = int(relid)
+                    result = session.run(query, relid=int_id)
+                    
+                    summary = result.consume()
+                    if summary.counters.relationships_deleted > 0:
+                        print(f"Successfully deleted relationship {relid}")
+                        return True
+                    else:
+                        print(f"No relationship found with ID: {relid}")
+                        return False
+                except ValueError:
+                    print(f"Relationship ID '{relid}' is not a valid integer")
+                    return False
+        except Exception as e:
+            print(f"Error deleting relationship: {e}")
+            return False
+
 
 
 

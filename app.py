@@ -556,5 +556,163 @@ def approve_contribution():
         print(f"Error processing contribution: {e}")
         return {"message": f"Error: {str(e)}"}, 500
 
+@app.route('/api/reportContent', methods=['POST'])
+def report_content():
+    try:
+        data = request.json
+        if not data:
+            return {"message": "Missing request data"}, 400
+            
+        # Required fields
+        relationship_id = data.get('relationship_id')
+        image_url = data.get('image_url')
+        reason = data.get('reason')
+        
+        if not relationship_id or not image_url or not reason:
+            return {"message": "Missing required fields"}, 400
+            
+        # Optional field
+        additional_info = data.get('additional_info', '')
+        
+        # Create report entry in Supabase
+        report_data = {
+            "relationship_id": relationship_id,
+            "image_url": image_url,
+            "reason": reason,
+            "additional_info": additional_info,
+            "status": "pending",
+            "created_at": datetime.now().isoformat()
+        }
+        
+        try:
+            result = supabase.table("reports").insert(report_data).execute()
+            print(f"Report submitted successfully: {result.data}")
+            return {"message": "Report submitted successfully"}, 200
+        except Exception as e:
+            print(f"Error inserting report into Supabase: {e}")
+            return {"message": f"Database error: {str(e)}"}, 500
+        
+    except Exception as e:
+        print(f"Error submitting report: {e}")
+        return {"message": f"Error: {str(e)}"}, 500
+
+@app.route('/api/getReports', methods=['GET'])
+def get_reports():
+    try:
+        # Get JWT token from request
+        auth_header = request.headers.get('Authorization')
+        if not auth_header or not auth_header.startswith('Bearer '):
+            return {"message": "Unauthorized - Missing or invalid token"}, 401
+        
+        token = auth_header.split(' ')[1]
+        
+        # Verify the token (simple check - in production, you'd want to verify with Supabase)
+        try:
+            # Get reports from Supabase
+            result = supabase.table("reports").select("*").execute()
+            reports = result.data
+            
+            return {"reports": reports}, 200
+        except Exception as e:
+            return {"message": "Unauthorized - Invalid token"}, 401
+    
+    except Exception as e:
+        print(f"Error fetching reports: {e}")
+        return {"message": f"Error: {str(e)}"}, 500
+
+@app.route('/api/reviewReport', methods=['POST'])
+def review_report():
+    try:
+        # Get JWT token from request
+        auth_header = request.headers.get('Authorization')
+        if not auth_header or not auth_header.startswith('Bearer '):
+            return {"message": "Unauthorized - Missing or invalid token"}, 401
+        
+        token = auth_header.split(' ')[1]
+        
+        # Get report ID and deletion flag
+        data = request.json
+        report_id = data.get('reportId')
+        delete_connection = data.get('deleteConnection', False)
+        
+        if not report_id:
+            return {"message": "Missing report ID"}, 400
+        
+        # Get the report to find the relationship ID
+        report_result = supabase.table("reports").select("*").eq("id", report_id).execute()
+        
+        if not report_result.data:
+            return {"message": "Report not found"}, 404
+            
+        report = report_result.data[0]
+        relationship_id = report.get("relationship_id")
+        
+        # If deleteConnection is true, delete the relationship from Neo4j
+        if delete_connection and relationship_id:
+            try:
+                # Delete the relationship using the connector
+                connector.delete_relationship(relationship_id)
+                print(f"Relationship {relationship_id} deleted successfully")
+            except Exception as e:
+                print(f"Error deleting relationship {relationship_id}: {e}")
+                # Continue processing to mark the report as reviewed even if deletion fails
+                
+        # Update the status in Supabase - just update the status field, not action_taken
+        supabase.table("reports").update({
+            "status": "reviewed"
+        }).eq("id", report_id).execute()
+        
+        return {"message": "Report processed successfully"}, 200
+    
+    except Exception as e:
+        print(f"Error reviewing report: {e}")
+        return {"message": f"Error: {str(e)}"}, 500
+
+@app.route('/api/updateContribution', methods=['POST'])
+def update_contribution():
+    try:
+        # Get JWT token from request
+        auth_header = request.headers.get('Authorization')
+        if not auth_header or not auth_header.startswith('Bearer '):
+            return {"message": "Unauthorized - Missing or invalid token"}, 401
+        
+        token = auth_header.split(' ')[1]
+        
+        # Get contribution data from request
+        data = request.json
+        contribution_id = data.get('id')
+        
+        if not contribution_id:
+            return {"message": "Missing contribution ID"}, 400
+        
+        # Check if contribution exists
+        result = supabase.table("contributions").select("*").eq("id", contribution_id).execute()
+        
+        if not result.data:
+            return {"message": "Contribution not found"}, 404
+        
+        # Update fields
+        update_data = {
+            "name": data.get("name"),
+            "email": data.get("email"),
+            "description": data.get("description"),
+            "date": data.get("date"),
+            "is_owner": data.get("is_owner"),
+            "owner_name": data.get("owner_name"),
+            "landing_url": data.get("landing_url"),
+            "public_acknowledgment": data.get("public_acknowledgment"),
+            "people": data.get("people"),
+            "is_new_person": data.get("is_new_person")
+        }
+        
+        # Update in Supabase
+        supabase.table("contributions").update(update_data).eq("id", contribution_id).execute()
+        
+        return {"message": "Contribution updated successfully"}, 200
+    
+    except Exception as e:
+        print(f"Error updating contribution: {e}")
+        return {"message": f"Error: {str(e)}"}, 500
+
 def shutdown(exception=None):
     connector.close()
